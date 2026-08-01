@@ -62,6 +62,7 @@ const corsOptions =
     : { origin: rawOrigins.split(',').map(o => o.trim()) };
 
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '5mb' })); // item images arrive as base64 data URLs, hence 5mb
 
 // ---------- tiny JSON-file "database" ----------
@@ -115,14 +116,14 @@ app.get('/', (req, res) => {
 
 // ================= ITEMS =================
 
-// GET /items — list every listing
-app.get('/items', (req, res) => {
+// GET /api/items — list every listing
+app.get('/api/items', (req, res) => {
   const db = readDB();
   res.json(db.items);
 });
 
-// POST /items — create a listing
-app.post('/items', (req, res) => {
+// POST /api/items — create a listing
+app.post('/api/items', (req, res) => {
   const db = readDB();
   const body = req.body || {};
 
@@ -164,8 +165,8 @@ app.post('/items', (req, res) => {
   res.status(201).json(item);
 });
 
-// POST /items/:id/interest — send a trade request message on a listing
-app.post('/items/:id/interest', (req, res) => {
+// POST /api/items/:id/interest — send a trade request message on a listing
+app.post('/api/items/:id/interest', (req, res) => {
   const db = readDB();
   const { id } = req.params;
   const { message, from } = req.body || {};
@@ -190,8 +191,8 @@ app.post('/items/:id/interest', (req, res) => {
 
 // ================= REVIEWS =================
 
-// POST /review — add a star rating + anonymous review text to a listing
-app.post('/review', (req, res) => {
+// POST /api/review — add a star rating + anonymous review text to a listing
+app.post('/api/review', (req, res) => {
   const db = readDB();
   const { listingId, rating, reviewText } = req.body || {};
 
@@ -221,14 +222,14 @@ app.post('/review', (req, res) => {
 
 // ================= ACCOUNTS / AUTH =================
 
-// GET /accounts — list accounts (used by the admin panel; passwords stripped)
-app.get('/accounts', (req, res) => {
+// GET /api/accounts — list accounts (used by the admin panel; passwords stripped)
+app.get('/api/accounts', (req, res) => {
   const db = readDB();
   res.json(db.accounts.map(sanitizeAccount));
 });
 
-// POST /accounts — sign up
-app.post('/accounts', (req, res) => {
+// POST /api/accounts — sign up
+app.post('/api/accounts', (req, res) => {
   const db = readDB();
   const { email, phone, username, password } = req.body || {};
 
@@ -259,8 +260,8 @@ app.post('/accounts', (req, res) => {
   res.status(201).json(sanitizeAccount(account));
 });
 
-// POST /login
-app.post('/login', (req, res) => {
+// POST /api/login
+app.post('/api/login', (req, res) => {
   const db = readDB();
   const { username, password } = req.body || {};
 
@@ -276,9 +277,9 @@ app.post('/login', (req, res) => {
   res.json(sanitizeAccount(account));
 });
 
-// PUT /accounts/:username — admin-only: rename an account's username
+// PUT /api/accounts/:username — admin-only: rename an account's username
 // Requires header: x-admin-secret: <ADMIN_SECRET>
-app.put('/accounts/:username', requireAdminSecret, (req, res) => {
+app.put('/api/accounts/:username', requireAdminSecret, (req, res) => {
   const db = readDB();
   const { username } = req.params;
   const { username: newUsername } = req.body || {};
@@ -300,9 +301,9 @@ app.put('/accounts/:username', requireAdminSecret, (req, res) => {
   res.json(sanitizeAccount(account));
 });
 
-// DELETE /accounts/:username — admin-only: remove a user
+// DELETE /api/accounts/:username — admin-only: remove a user
 // Requires header: x-admin-secret: <ADMIN_SECRET>
-app.delete('/accounts/:username', requireAdminSecret, (req, res) => {
+app.delete('/api/accounts/:username', requireAdminSecret, (req, res) => {
   const db = readDB();
   const { username } = req.params;
 
@@ -316,8 +317,8 @@ app.delete('/accounts/:username', requireAdminSecret, (req, res) => {
 
 // ================= PREMIUM =================
 
-// POST /premium — set a user's premium flag (called after the "payment" step)
-app.post('/premium', (req, res) => {
+// POST /api/premium — set a user's premium flag (called after the "payment" step)
+app.post('/api/premium', (req, res) => {
   const db = readDB();
   const { username, premium } = req.body || {};
 
