@@ -2,42 +2,16 @@
  * Swapify backend
  * ----------------
  * Implements every endpoint the frontend (index.html / profile.html) calls:
- *   GET    /items
- *   POST   /items
- *   POST   /items/:id/interest
- *   POST   /review
- *   GET    /accounts
- *   POST   /accounts
- *   POST   /login
- *   PUT    /accounts/:username
- *   DELETE /accounts/:username
- *   POST   /premium
- *
- * Storage: a single JSON file (data/db.json) read/written on every request.
- * This is intentionally simple to match the size of the project — see the
- * "WHAT COULD BREAK" notes below and in the README before relying on this
- * for anything with real users or money.
- *
- * WHAT COULD BREAK:
- * - Concurrency: two requests writing at the exact same moment can clobber
- *   each other (last write wins). Fine for a small class/demo project;
- *   not fine at real scale. A real database (Postgres/Mongo) fixes this.
- * - Ephemeral disks: many free hosts (including Render's free web service
- *   tier) wipe the local filesystem on every restart/redeploy. That means
- *   data/db.json — and everyone's accounts/listings — can vanish on
- *   redeploy unless you attach a persistent disk or move to a real DB.
- * - No sessions/auth tokens: every request trusts whatever username the
- *   client claims to be (e.g. "postedBy"). This backend recomputes
- *   admin/premium status server-side from the account record so a user
- *   can't just lie about being an admin in devtools — but it still can't
- *   verify *which* real person is making the request, since there's no
- *   login session/token system. Good enough for a hobby project; add
- *   proper auth (JWT/sessions) before this handles anything sensitive.
- * - The two admin-only routes (rename user, delete user) require an
- *   `x-admin-secret` header matching ADMIN_SECRET. Your current frontend
- *   doesn't send this header yet — see README "Frontend changes needed".
- * - Never add fields for raw card numbers/CVV to any endpoint here. The
- *   current payment form doesn't send that data anywhere — keep it that way.
+ *   GET    /api/items
+ *   POST   /api/items
+ *   POST   /api/items/:id/interest
+ *   POST   /api/review
+ *   GET    /api/accounts
+ *   POST   /api/accounts
+ *   POST   /api/login
+ *   PUT    /api/accounts/:username
+ *   DELETE /api/accounts/:username
+ *   POST   /api/premium
  */
 
 const fs = require('fs');
@@ -50,31 +24,67 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-this-to-a-long-random-value';
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'HELLOIMPENNYWISETHEDANCINGCLOWN';
 const DB_PATH = path.join(__dirname, 'data', 'db.json');
 
-// ---------- CORS ----------
-// CORS_ORIGIN can be "*" (dev only) or a comma-separated allowlist of origins.
-const rawOrigins = (process.env.CORS_ORIGIN || '*').trim();
-const corsOptions =
-  rawOrigins === '*'
-    ? { origin: '*' }
-    : { origin: rawOrigins.split(',').map(o => o.trim()) };
+// ---------- CORS (Bulletproof Frontend Linking) ----------
+const defaultAllowedOrigins = [
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://siddharth-dev-frontend.onrender.com'
+];
+
+const envOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : [];
+const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...envOrigins])];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow non-browser requests (Postman, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    
+    if (
+      process.env.CORS_ORIGIN === '*' ||
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.onrender.com') ||
+      origin.endsWith('.vercel.app')
+    ) {
+      return callback(null, true);
+    }
+    
+    return callback(new Error('Not allowed by CORS policy'));
+  },
+  credentials: true
+};
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '5mb' })); // item images arrive as base64 data URLs, hence 5mb
 
 // ---------- tiny JSON-file "database" ----------
+function ensureDBStorage() {
+  const dbDir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+}
+
 function readDB() {
+  ensureDBStorage();
   if (!fs.existsSync(DB_PATH)) {
     const empty = { items: [], accounts: [] };
     fs.writeFileSync(DB_PATH, JSON.stringify(empty, null, 2));
     return empty;
   }
+
   const raw = fs.readFileSync(DB_PATH, 'utf-8');
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return {
+      items: Array.isArray(parsed.items) ? parsed.items : [],
+      accounts: Array.isArray(parsed.accounts) ? parsed.accounts : []
+    };
   } catch (e) {
     console.error('db.json is corrupted, starting fresh:', e.message);
     return { items: [], accounts: [] };
@@ -82,6 +92,7 @@ function readDB() {
 }
 
 function writeDB(db) {
+  ensureDBStorage();
   fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
 }
 
@@ -134,8 +145,6 @@ app.post('/api/items', (req, res) => {
     }
   }
 
-  // Don't trust client-claimed admin/premium flags — recompute from the
-  // real account record so someone can't fake "postedByAdmin: true" via devtools.
   const postedBy = body.postedBy && String(body.postedBy).trim() ? String(body.postedBy).trim() : 'Guest';
   const posterAccount = postedBy !== 'Guest' ? findAccountByUsername(db, postedBy) : null;
   const postedByAdmin = !!(posterAccount && posterAccount.admin);
@@ -240,9 +249,6 @@ app.post('/api/accounts', (req, res) => {
     return res.status(409).json({ error: 'This username already exists. Please log in or choose another username.' });
   }
 
-  // Admin/premium status is decided here, server-side, by comparing the
-  // plaintext password (before hashing) against ADMIN_SECRET — NOT by
-  // trusting anything the client sends.
   const isAdmin = password === ADMIN_SECRET;
 
   const account = {
@@ -278,7 +284,6 @@ app.post('/api/login', (req, res) => {
 });
 
 // PUT /api/accounts/:username — admin-only: rename an account's username
-// Requires header: x-admin-secret: <ADMIN_SECRET>
 app.put('/api/accounts/:username', requireAdminSecret, (req, res) => {
   const db = readDB();
   const { username } = req.params;
@@ -302,7 +307,6 @@ app.put('/api/accounts/:username', requireAdminSecret, (req, res) => {
 });
 
 // DELETE /api/accounts/:username — admin-only: remove a user
-// Requires header: x-admin-secret: <ADMIN_SECRET>
 app.delete('/api/accounts/:username', requireAdminSecret, (req, res) => {
   const db = readDB();
   const { username } = req.params;
@@ -317,7 +321,7 @@ app.delete('/api/accounts/:username', requireAdminSecret, (req, res) => {
 
 // ================= PREMIUM =================
 
-// POST /api/premium — set a user's premium flag (called after the "payment" step)
+// POST /api/premium — set a user's premium flag
 app.post('/api/premium', (req, res) => {
   const db = readDB();
   const { username, premium } = req.body || {};
@@ -327,7 +331,7 @@ app.post('/api/premium', (req, res) => {
   const account = findAccountByUsername(db, username);
   if (!account) return res.status(404).json({ error: 'Account not found.' });
 
-  account.premium = !!premium || account.admin; // admins are always premium
+  account.premium = !!premium || account.admin;
   writeDB(db);
   res.json(sanitizeAccount(account));
 });
