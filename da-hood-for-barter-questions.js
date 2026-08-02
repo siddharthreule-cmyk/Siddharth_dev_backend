@@ -20,19 +20,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.json({ status: 'Swapify backend is live and running!' });
+});
+
 // ---------------------------------------------------------------------------
 // 1. LLM CLIENT CONFIGURATION
 // ---------------------------------------------------------------------------
-// For OpenAI: leave baseURL as default (comment it out) and use an OpenAI key.
-// For Groq: set baseURL to "https://api.groq.com/openai/v1" and use a Groq key.
 const client = new OpenAI({
   apiKey: process.env.SWAPIFY_LLM_API_KEY || 'YOUR_API_KEY_HERE',
-  baseURL: 'https://api.groq.com/openai/v1', // remove this line to use OpenAI instead
+  baseURL: 'https://api.groq.com/openai/v1',
 });
 
-// Pick a model that matches whichever provider/baseURL you're using above.
-// Groq examples: "llama-3.3-70b-versatile", "llama-3.1-8b-instant"
-// OpenAI examples: "gpt-4o-mini", "gpt-4o"
 const MODEL = process.env.SWAPIFY_LLM_MODEL || 'llama-3.3-70b-versatile';
 
 // ---------------------------------------------------------------------------
@@ -77,8 +76,6 @@ Ground rules:
 // ---------------------------------------------------------------------------
 // 3. CHAT ENDPOINT
 // ---------------------------------------------------------------------------
-// Accepts: { message: string, history?: [{ role: 'user'|'assistant', content: string }] }
-// Returns: { reply: string }
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, history } = req.body;
@@ -87,7 +84,6 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'A non-empty "message" string is required.' });
     }
 
-    // Optional prior turns from the frontend, capped to keep requests small/fast.
     const priorTurns = Array.isArray(history) ? history.slice(-10) : [];
 
     const messages = [
