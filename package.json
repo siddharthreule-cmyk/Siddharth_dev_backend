@@ -2,17 +2,18 @@
   "name": "swapify-backend",
   "version": "1.0.0",
   "description": "Backend API for the Swapify barter marketplace (items, accounts, login, premium, reviews, trade interest).",
-  "main": "server.js",
+  "main": "da-hood-for-barter-questions.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node da-hood-for-barter-questions.js",
+    "dev": "node da-hood-for-barter-questions.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "nanoid": "^3.3.7"
+    "nanoid": "^3.3.7",
+    "openai": "^4.28.0"
   },
   "engines": {
     "node": ">=18"
