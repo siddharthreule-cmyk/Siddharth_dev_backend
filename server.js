@@ -19,7 +19,13 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
+<<<<<<< HEAD
 const OpenAI = require('openai');
+const nodemailer = require('nodemailer');
+const crypto = require('crypto');
+=======
+const OpenAI = require('openai');
+>>>>>>> 0d24511357fbff865b675ccc0a0505ab7455353f
 require('dotenv').config();
 
 const app = express();
@@ -67,7 +73,7 @@ app.use(express.json({ limit: '5mb' })); // item images arrive as base64 data UR
 // both the CRUD routes above and the AI chat below.
 
 const aiClient = new OpenAI({
-  apiKey: process.env.SWAPIFY_LLM_API_KEY || 'YOUR_API_KEY_HERE',
+  apiKey: process.env.SWAPIFY_LLM_API_KEY,
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
@@ -274,6 +280,114 @@ app.post('/api/review', (req, res) => {
 
   writeDB(db);
   res.status(201).json(item);
+});
+
+// ================= SIGNUP EMAIL VERIFICATION (Gmail OTP) =================
+// Used only during signup — login stays username/password as-is.
+//
+// Requires these env vars in Render:
+//   GMAIL_USER=swapifysupport@gmail.com
+//   GMAIL_APP_PASSWORD=<16-char Gmail App Password, NOT your real password>
+// Generate an App Password at https://myaccount.google.com/apppasswords
+// after turning on 2-Step Verification for the Gmail account.
+
+const mailTransporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD,
+  },
+});
+
+const signupOtpStore = new Map(); // email -> { code, expiresAt, attempts }
+const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_OTP_ATTEMPTS = 5;
+
+function generateOtpCode() {
+  return crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+}
+
+function isValidEmail(email) {
+  return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// POST /api/send-otp — send a 6-digit code to the email being signed up with
+app.post('/api/send-otp', async (req, res) => {
+  try {
+    const { email } = req.body || {};
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'A valid email address is required.' });
+    }
+
+    const db = readDB();
+    const alreadyUsed = db.accounts.some(
+      acc => String(acc.email || '').trim().toLowerCase() === email.trim().toLowerCase()
+    );
+    if (alreadyUsed) {
+      return res.status(409).json({ error: 'An account with this email already exists.' });
+    }
+
+    const code = generateOtpCode();
+    const key = email.trim().toLowerCase();
+    signupOtpStore.set(key, { code, expiresAt: Date.now() + OTP_TTL_MS, attempts: 0 });
+
+    await mailTransporter.sendMail({
+      from: `"Swapify" <${process.env.GMAIL_USER}>`,
+      to: email,
+      subject: 'Verify your email for Swapify',
+      text: `Your Swapify verification code is ${code}. It expires in 5 minutes.`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 420px; margin: 0 auto;">
+          <h2 style="color:#4f8cff;">Verify your email</h2>
+          <p>Use this code to finish creating your Swapify account. It expires in 5 minutes.</p>
+          <div style="font-size: 32px; font-weight: 700; letter-spacing: 6px; padding: 16px 0;">${code}</div>
+          <p style="color:#888; font-size: 13px;">If you didn't request this, you can ignore this email.</p>
+        </div>
+      `,
+    });
+
+    return res.json({ success: true, message: 'Verification code sent.' });
+  } catch (error) {
+    console.error('send-otp error:', error);
+    return res.status(500).json({ error: 'Unable to send verification code. Please try again shortly.' });
+  }
+});
+
+// POST /api/verify-otp — confirm the code before the account is created
+app.post('/api/verify-otp', (req, res) => {
+  try {
+    const { email, code } = req.body || {};
+
+    if (!isValidEmail(email) || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
+      return res.status(400).json({ verified: false, error: 'A valid email and 6-digit code are required.' });
+    }
+
+    const key = email.trim().toLowerCase();
+    const record = signupOtpStore.get(key);
+
+    if (!record) {
+      return res.status(400).json({ verified: false, error: 'No code was requested for this email. Request a new one.' });
+    }
+    if (Date.now() > record.expiresAt) {
+      signupOtpStore.delete(key);
+      return res.status(400).json({ verified: false, error: 'This code has expired. Request a new one.' });
+    }
+    if (record.attempts >= MAX_OTP_ATTEMPTS) {
+      signupOtpStore.delete(key);
+      return res.status(429).json({ verified: false, error: 'Too many incorrect attempts. Request a new code.' });
+    }
+    if (record.code !== code) {
+      record.attempts += 1;
+      return res.status(400).json({ verified: false, error: 'Incorrect code.' });
+    }
+
+    signupOtpStore.delete(key); // one-time use
+    return res.json({ verified: true, message: 'Email verified.' });
+  } catch (error) {
+    console.error('verify-otp error:', error);
+    return res.status(500).json({ verified: false, error: 'Server error while verifying the code.' });
+  }
 });
 
 // ================= ACCOUNTS / AUTH =================
