@@ -13,11 +13,6 @@
  *   DELETE /api/accounts/:username
  *   POST   /api/premium
  */
-require('dotenv').config({ path: '.env.gmail' });
-const nodemailer = require('nodemailer');
-
-// Test that it loaded correctly
-console.log("Email User Loaded:", process.env.EMAIL_USER);
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
