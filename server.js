@@ -20,7 +20,7 @@ const path = require('path');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
-const nodemailer = require('nodemailer');
+
 const crypto = require('crypto');
 require('dotenv').config();
 
@@ -256,86 +256,6 @@ app.post('/api/review', (req, res) => {
   res.status(201).json(item);
 });
 
-// ================= SIGNUP EMAIL VERIFICATION =================
-const mailTransporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
-
-const signupOtpStore = new Map();
-const OTP_TTL_MS = 5 * 60 * 1000;
-const MAX_OTP_ATTEMPTS = 5;
-
-function generateOtpCode() {
-  return crypto.randomInt(0, 1000000).toString().padStart(6, '0');
-}
-
-function isValidEmail(email) {
-  return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-app.post('/api/send-otp', async (req, res) => {
-  try {
-    const { email } = req.body || {};
-
-    if (!isValidEmail(email)) {
-      return res.status(400).json({ error: 'A valid email address is required.' });
-    }
-
-    const db = readDB();
-    const alreadyUsed = db.accounts.some(
-      acc => String(acc.email || '').trim().toLowerCase() === email.trim().toLowerCase()
-    );
-    if (alreadyUsed) {
-      return res.status(409).json({ error: 'An account with this email already exists.' });
-    }
-
-    const code = generateOtpCode();
-    const key = email.trim().toLowerCase();
-    signupOtpStore.set(key, { code, expiresAt: Date.now() + OTP_TTL_MS, attempts: 0 });
-
-    await mailTransporter.sendMail({
-      from: `"Swapify" <${process.env.GMAIL_USER}>`,
-      to: email,
-      subject: 'Verify your email for Swapify',
-      text: `Your Swapify verification code is ${code}. It expires in 5 minutes.`,
-    });
-
-    return res.json({ success: true, message: 'Verification code sent.' });
-  } catch (error) {
-    console.error('send-otp error:', error);
-    return res.status(500).json({ error: 'Unable to send verification code.' });
-  }
-});
-
-app.post('/api/verify-otp', (req, res) => {
-  try {
-    const { email, code } = req.body || {};
-
-    if (!isValidEmail(email) || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
-      return res.status(400).json({ verified: false, error: 'A valid email and 6-digit code are required.' });
-    }
-
-    const key = email.trim().toLowerCase();
-    const record = signupOtpStore.get(key);
-
-    if (!record || Date.now() > record.expiresAt) {
-      return res.status(400).json({ verified: false, error: 'Code expired or invalid.' });
-    }
-    if (record.code !== code) {
-      record.attempts += 1;
-      return res.status(400).json({ verified: false, error: 'Incorrect code.' });
-    }
-
-    signupOtpStore.delete(key);
-    return res.json({ verified: true, message: 'Email verified.' });
-  } catch (error) {
-    return res.status(500).json({ verified: false, error: 'Server error.' });
-  }
-});
 
 // ================= ACCOUNTS / AUTH =================
 app.get('/api/accounts', (req, res) => {
