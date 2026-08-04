@@ -19,6 +19,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
+const OpenAI = require('openai');
 require('dotenv').config();
 
 const app = express();
@@ -60,6 +61,53 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '5mb' })); // item images arrive as base64 data URLs, hence 5mb
+
+// ================= SWAPIFY AI CHAT =================
+// Merged in from da-hood-for-barter-questions.js so one process serves
+// both the CRUD routes above and the AI chat below.
+
+const aiClient = new OpenAI({
+  apiKey: process.env.SWAPIFY_LLM_API_KEY || 'YOUR_API_KEY_HERE',
+  baseURL: 'https://api.groq.com/openai/v1',
+});
+
+const AI_MODEL = process.env.SWAPIFY_LLM_MODEL || 'llama-3.3-70b-versatile';
+
+const AI_SYSTEM_PROMPT = `
+You're Swapify AI — think of yourself as the sharp, street-smart friend everyone
+wishes they had before making a trade. You live inside Swapify, a barter
+marketplace where people swap items instead of buying them with cash.
+
+How you talk:
+- Like a real person, not a corporate chatbot. Casual, warm, a little witty when
+  it fits — but never sloppy or unclear.
+- Straight to the point. No stiff filler like "I would be happy to assist you
+  with that." Just help, like you're texting a friend who knows their stuff.
+- Confident opinions, not wishy-washy hedging. If a trade looks lopsided, say so
+  plainly and explain why.
+
+What you actually help with:
+- Writing listings and descriptions that don't sound generic — punchy, honest,
+  and specific to the item.
+- Sizing up proposed trades and giving a real gut-check: does this feel roughly
+  even, is one side clearly getting the better end, and what would make it fair
+  (e.g. "throw in a little extra" or "ask for something small back").
+- Answering questions about how bartering, categories, listings, and Swapify
+  itself work.
+- Dropping practical, no-nonsense safety tips — meet in public, check the item
+  in person, don't rush a deal that feels off.
+- If someone brings up trading big-ticket stuff (cars, houses, yachts, jets,
+  boats, diamonds, gold, jewellery, submarines, bunkers, islands, castles, fine
+  art), let them know casually that Swapify Premium is needed for that tier of
+  trade.
+
+Ground rules:
+- Never invent exact real-world dollar prices — you don't have live market data.
+  Talk fairness in terms of condition, demand, usefulness, and what feels like a
+  reasonable trade, not made-up figures.
+- Stay practical and human. You're here to help people make good trades, not to
+  recite policy.
+`.trim();
 
 // ---------- tiny JSON-file "database" ----------
 function ensureDBStorage() {
@@ -316,6 +364,52 @@ app.delete('/api/accounts/:username', requireAdminSecret, (req, res) => {
   db.accounts.splice(index, 1);
   writeDB(db);
   res.json({ ok: true, removed: username });
+});
+
+// ================= AI CHAT =================
+
+// POST /api/chat — Swapify AI barter assistant
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { message, history } = req.body || {};
+
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ error: 'A non-empty "message" string is required.' });
+    }
+
+    const priorTurns = Array.isArray(history) ? history.slice(-10) : [];
+
+    const messages = [
+      { role: 'system', content: AI_SYSTEM_PROMPT },
+      ...priorTurns
+        .filter(
+          (turn) =>
+            turn &&
+            (turn.role === 'user' || turn.role === 'assistant') &&
+            typeof turn.content === 'string'
+        )
+        .map((turn) => ({ role: turn.role, content: turn.content })),
+      { role: 'user', content: message },
+    ];
+
+    const completion = await aiClient.chat.completions.create({
+      model: AI_MODEL,
+      messages,
+      temperature: 0.5,
+      max_tokens: 500,
+    });
+
+    const reply =
+      completion.choices?.[0]?.message?.content?.trim() ||
+      "I couldn't come up with a reply just now — please try again.";
+
+    return res.json({ reply });
+  } catch (error) {
+    console.error('Swapify AI chat error:', error);
+    return res.status(500).json({
+      error: 'Swapify AI is temporarily unavailable. Please try again shortly.',
+    });
+  }
 });
 
 // ================= PREMIUM =================
